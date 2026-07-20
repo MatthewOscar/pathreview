@@ -34,7 +34,7 @@ With the app running locally I sent 80 rapid `POST /auth/login` attempts with wr
 
 **PLAN.md link:** https://github.com/MatthewOscar/pathreview/blob/feat/70-per-ip-rate-limiting/PLAN.md
 
-**Walkthrough video (recommended):** Not recorded yet.
+**Walkthrough video (recommended):** Not recorded.
 
 **Blockers or open questions:**
 - The plan decodes the Bearer token inside the middleware to get the user identity, since `get_current_user` in `api/middleware/auth.py` is a route dependency and runs too late. I want to confirm in PR review that the maintainers are fine with that, and with `/health` staying exempt as a liveness probe.
