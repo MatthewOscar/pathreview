@@ -39,3 +39,35 @@ With the app running locally I sent 80 rapid `POST /auth/login` attempts with wr
 **Blockers or open questions:**
 - The plan decodes the Bearer token inside the middleware to get the user identity, since `get_current_user` in `api/middleware/auth.py` is a route dependency and runs too late. I want to confirm in PR review that the maintainers are fine with that, and with `/health` staying exempt as a liveness probe.
 - `check_rate_limit` returns a remaining request count, so the plan uses a fixed `Retry-After: 60`. If reviewers want the real seconds until reset, `RateLimiter` would need a small extension, which I have kept out of scope for now.
+
+## Week 9 — Solution building & PR submission
+
+### Check-in 1 (mid-week)
+
+**Current progress:**
+Sub-tasks 1 through 4 from PLAN.md are implemented: `RateLimitMiddleware` in `api/middleware/rate_limit.py` enforcing the `ip:` budget on every non-exempt request and the `user:` budget when a Bearer token decodes, IP extraction with the new `rate_limit_trust_proxy` opt-in, the full 429 contract, and the wiring in `api/main.py`. Thirteen unit tests pass against a mocked Redis client. Before touching code I recorded the repo baseline the course guide asks for: 182 ruff errors, 52 files black would reformat, 5 mypy stub errors plus 44 more reachable from `api.main`, and 53 failing unit tests, all pre-existing.
+
+**Next steps:**
+Promote the Week 8 xfail repro test into real assertions, verify the fix live against the running app, re-run the full check suite against the recorded baseline, and open the PR.
+
+**Blockers:**
+The pre-commit mypy hook fails on the pre-existing type errors whenever `api/main.py` changes, so that commit needed `--no-verify` with the identical before and after error set documented in the commit message.
+
+---
+
+### Check-in 2 (end of week)
+
+**PR link:** https://github.com/ascherj/pathreview/pull/313
+
+**Branch:** `feat/70-per-ip-rate-limiting`
+
+**What you built:**
+Middleware that applies the existing `RateLimiter` to the request path with two rolling-window budgets: per IP for all traffic and per user for authenticated traffic, returning 429 with `Retry-After` and `X-RateLimit` headers when either is exceeded. Redis runs off the event loop with short socket timeouts so a slow or dead Redis fails open instead of stalling the API. Verified live: 70 rapid unauthenticated login attempts got exactly the configured 60 served, then straight 429s, while `/health` stayed exempt.
+
+**Tests added or updated:**
+`tests/unit/test_rate_limit_middleware.py` (new, 13 tests): budgets and identifier keys, the 429 header and body contract, `/health` exemption, both `X-Forwarded-For` trust modes, token edge cases, zero limit, missing client, and fail-open on connection errors and timeouts. `tests/unit/test_ip_rate_limiting_repro.py` (promoted from the Week 8 xfail, 4 tests): middleware registered, the real stack constructs with the kwargs wired in `api/main.py`, a request flows with Redis unreachable, and CORS preflights keep `X-Request-ID`.
+
+**Self-review confirmation:** [x] make check passes  [x] make test-unit passes
+(per the course definition for a codebase with documented pre-existing failures: both commands fail before and after my branch with byte-identical failure sets, so my changes introduce no new failures; every file I added or touched passes ruff, black, and mypy individually, and unit tests went from 375 to 392 passing)
+
+**Draft PR feedback received from:** none
