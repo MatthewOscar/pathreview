@@ -1,10 +1,10 @@
-"""Reproduction for issue #70: no per-IP rate limiting on unauthenticated requests.
+"""Regression test for issue #70: rate limiting must be wired into the API.
 
-Reproduced locally on 2026-07-19 by sending 80 rapid POST /auth/login attempts
-with bad credentials from a single IP: every request was served (401), and no
-request ever received a 429. The RateLimiter in safety/rate_limiter.py accepts
-any identifier string but is never wired into the API, so unauthenticated
-traffic to public endpoints is not rate limited at all.
+Originally committed as a strict xfail documenting the reproduction: 80 rapid
+POST /auth/login attempts with bad credentials from a single IP were all
+served (401) and never received a 429, because safety/rate_limiter.py was
+never applied to incoming requests. RateLimitMiddleware now closes that gap,
+so this test asserts the middleware is registered.
 """
 
 import importlib
@@ -12,18 +12,9 @@ import importlib
 import pytest
 
 
-@pytest.mark.xfail(
-    reason="Issue #70: RateLimiter exists in safety/rate_limiter.py but is never "
-    "applied to incoming requests, so unauthenticated clients are never throttled",
-    strict=True,
-)
+@pytest.mark.unit
 def test_rate_limiting_middleware_is_registered() -> None:
-    """The app should apply rate limiting middleware to incoming requests.
-
-    As of this commit the middleware stack in api/main.py contains only CORS
-    and RequestID, so any client can hammer public endpoints such as
-    POST /auth/login without ever seeing a 429.
-    """
+    """The app applies rate limiting middleware to incoming requests."""
     # api.main is imported dynamically because the pre-commit mypy hook follows
     # static imports into the api package, which has pre-existing type errors.
     app = importlib.import_module("api.main").app
