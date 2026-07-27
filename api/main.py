@@ -42,18 +42,22 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
-# Add rate limiting middleware first: add_middleware prepends, so registering
-# rate limiting before request ID and CORS keeps CORS outermost and rate
-# limited 429 responses still carry CORS headers for the frontend.
+# add_middleware prepends, so this registration order produces the runtime
+# stack RequestID outermost (preserving X-Request-ID on CORS preflights),
+# then CORS (so rate limited 429 responses carry CORS headers), then rate
+# limiting innermost. The short Redis socket timeouts make a slow or
+# unreachable Redis raise quickly so the limiter fails open instead of
+# stalling requests.
 app.add_middleware(
     RateLimitMiddleware,
-    redis_client=redis.Redis.from_url(settings.redis_url),
+    redis_client=redis.Redis.from_url(
+        settings.redis_url,
+        socket_connect_timeout=0.5,
+        socket_timeout=0.5,
+    ),
     limit=settings.rate_limit_per_minute,
     trust_proxy=settings.rate_limit_trust_proxy,
 )
-
-# Add request ID middleware
-app.add_middleware(RequestIDMiddleware)
 
 # Add CORS middleware
 app.add_middleware(
@@ -63,6 +67,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add request ID middleware
+app.add_middleware(RequestIDMiddleware)
 
 
 # Exception handler for unhandled exceptions

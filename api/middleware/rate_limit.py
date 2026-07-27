@@ -5,6 +5,7 @@ import ipaddress
 import redis
 import structlog
 from fastapi import Request
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
@@ -58,16 +59,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.exempt_paths:
             return await call_next(request)
 
-        ip_allowed, _ = self.limiter.check_rate_limit(
-            f"ip:{self._client_ip(request)}", self.limit, self.window_seconds
+        # check_rate_limit uses the synchronous Redis client, so it runs in
+        # the threadpool to keep Redis round trips off the event loop.
+        ip_allowed, _ = await run_in_threadpool(
+            self.limiter.check_rate_limit,
+            f"ip:{self._client_ip(request)}",
+            self.limit,
+            self.window_seconds,
         )
         if not ip_allowed:
             return self._rate_limited_response()
 
         user_id = self._extract_user_id(request)
         if user_id is not None:
-            user_allowed, _ = self.limiter.check_rate_limit(
-                f"user:{user_id}", self.limit, self.window_seconds
+            user_allowed, _ = await run_in_threadpool(
+                self.limiter.check_rate_limit,
+                f"user:{user_id}",
+                self.limit,
+                self.window_seconds,
             )
             if not user_allowed:
                 return self._rate_limited_response()
