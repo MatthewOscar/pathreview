@@ -87,6 +87,13 @@ class TestRateLimitMiddleware:
         response = client.get("/ping")
         assert response.status_code == 200
 
+    def test_redis_timeout_fails_open(self, mock_redis: Mock) -> None:
+        """A Redis timeout allows the request instead of blocking traffic."""
+        mock_redis.zremrangebyscore = Mock(side_effect=TimeoutError("timed out"))
+        client = TestClient(build_app(mock_redis))
+        response = client.get("/ping")
+        assert response.status_code == 200
+
     def test_forwarded_header_ignored_by_default(self, mock_redis: Mock) -> None:
         """X-Forwarded-For is ignored unless proxy trust is enabled."""
         client = TestClient(build_app(mock_redis))
