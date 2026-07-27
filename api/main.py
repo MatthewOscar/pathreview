@@ -1,11 +1,14 @@
+import redis
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
-import structlog
+from fastapi.responses import JSONResponse
 
+from api.middleware.rate_limit import RateLimitMiddleware
 from api.middleware.request_id import RequestIDMiddleware
-from api.routes import auth, profiles, reviews, health
+from api.routes import auth, health, profiles, reviews
+from core.config import settings
 from core.database import init_db
 
 log = structlog.get_logger()
@@ -30,9 +33,7 @@ def custom_openapi():
         routes=app.routes,
     )
 
-    openapi_schema["info"]["x-logo"] = {
-        "url": "https://pathreview.example.com/logo.png"
-    }
+    openapi_schema["info"]["x-logo"] = {"url": "https://pathreview.example.com/logo.png"}
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
@@ -40,6 +41,19 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
+
+# Add rate limiting middleware first: add_middleware prepends, so registering
+# rate limiting before request ID and CORS keeps CORS outermost and rate
+# limited 429 responses still carry CORS headers for the frontend.
+app.add_middleware(
+    RateLimitMiddleware,
+    redis_client=redis.Redis.from_url(settings.redis_url),
+    limit=settings.rate_limit_per_minute,
+    trust_proxy=settings.rate_limit_trust_proxy,
+)
+
+# Add request ID middleware
+app.add_middleware(RequestIDMiddleware)
 
 # Add CORS middleware
 app.add_middleware(
@@ -49,9 +63,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Add request ID middleware
-app.add_middleware(RequestIDMiddleware)
 
 
 # Exception handler for unhandled exceptions
