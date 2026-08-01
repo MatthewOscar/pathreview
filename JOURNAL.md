@@ -71,3 +71,33 @@ Middleware that applies the existing `RateLimiter` to the request path with two 
 (per the course definition for a codebase with documented pre-existing failures: both commands fail before and after my branch with byte-identical failure sets, so my changes introduce no new failures; every file I added or touched passes ruff, black, and mypy individually, and unit tests went from 375 to 392 passing)
 
 **Draft PR feedback received from:** none
+
+## Week 10 — Iteration & reflection
+
+### Reviewer feedback
+
+**Feedback received:** [ ] Yes  [x] No — still awaiting review
+
+**Summary of feedback:**
+I checked PR #313 through the end of the week. There are no reviews, no review comments, and no conversation comments, and the PR still shows as awaiting review. This was expected, since reviewer feedback is not part of the Summer 2026 offering. The two questions I flagged for reviewers in Week 8, whether decoding the Bearer token inside the middleware is acceptable and whether `/health` should stay exempt, remain open on the PR for whenever a maintainer picks it up.
+
+**How you responded:**
+
+---
+
+### Reflection
+
+**What was harder than you expected?**
+The state of the checks in the existing codebase, by a wide margin. I expected the middleware logic to be the hard part, and it mostly went to plan. What I had not planned for was that `make check` and `make test-unit` already failed on main before I changed a single line: 182 ruff errors, 52 files black wanted to reformat, dozens of mypy errors, and 53 failing unit tests. "Existing tests still pass" stops being a checkbox at that point and becomes an evidence problem. I ended up recording the full failure set before my first commit and proving after each change that the set was byte-identical, with only my new tests added on top. The pre-commit mypy hook made this concrete: any commit touching `api/main.py` was blocked by pre-existing type errors in files I never touched, so I had to commit with `--no-verify` and document the identical before and after error counts in the commit message. That felt uncomfortable every single time, even though it was the correct call for keeping the diff reviewable.
+
+**What did you learn about working in a large codebase?**
+Issue descriptions describe the code the author remembers, and the repo is the only source of truth. Issue #70 asked for per-IP limiting "in addition to per user," which implies per-user limiting exists. It did only as an unwired class: nothing in the request path ever called `check_rate_limit`, and the `rate_limit_per_minute` setting had no readers. Grepping for callers during issue selection is what caught this, and it changed the entire shape of the work from "add a second key" to "build the enforcement layer." I also learned a kind of restraint I never need in my own projects. In my own code I fix lint errors the moment I see them; here, touching any of those 182 ruff errors would have buried the actual change in noise, so leaving known problems alone was part of doing the job well. Finally, framework mechanics I would have glossed over solo really matter when someone else has to trust the change: Starlette's `add_middleware` prepends, so registration order is the reverse of runtime order, and my wiring tests assert the real stack because of it.
+
+**How did AI tools help — and where did they fall short?**
+AI was most useful for mapping and for test breadth. It found the no-callers situation quickly, surfaced `api/middleware/request_id.py` as the house pattern to copy, and helped me enumerate a 13-test matrix for the middleware (trust-proxy modes, token edge cases, zero limit, missing client, timeout fail-open) that I would have partially missed on my own. It also caught a real bug in review: the sync Redis client was being called directly in async `dispatch`, which would have stalled the event loop under a slow Redis. Where it fell short was anything requiring the running system or a judgment call. Confirming the fail-open behavior meant actually killing Redis and watching requests still succeed, and confirming enforcement meant sending 70 rapid login attempts and counting exactly 60 served before the 429s started. No amount of generated code substitutes for that. And the scope questions, like whether `/health` deserves an exemption as a liveness probe, are maintainer decisions; the model would happily argue either side, so I had to make the call, document it, and flag it for review.
+
+**What would you do differently if you started over?**
+I would run the reproduction during Week 7 instead of waiting for Week 8. I suspected during selection that enforcement did not exist, since grep showed no callers, and I confirmed it a week later with the 80-request login test. That confirmation is what settled the real scope, and having it in hand a week earlier would have let me raise my two open design questions with the maintainer before implementation instead of baking my best guesses into an unreviewed PR. I would also reconsider the fixed `Retry-After: 60`. I kept the real reset-time calculation out of scope to avoid extending `RateLimiter`, but I ended up deep in that class's behavior anyway for the fail-open tests, so the extension would have cost little and made the header honest.
+
+**What are you most proud of?**
+The arc of the reproduction test. In Week 8 it was a strict xfail documenting that no rate limiting middleware existed in the request path. In Week 9 I promoted it into four hard assertions that construct the real middleware stack with the real wiring from `api/main.py`. The same file that proved the bug now proves the fix and will fail loudly if anyone unwires the middleware later. That before-and-after is the part of the contribution I would show someone first.
